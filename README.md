@@ -2,7 +2,6 @@
 
 Self-hosted Xray proxy management for small teams. Push configs over SSH, detect config drift, and generate multi-format subscriptions from one embedded Go binary.
 
-[中文文档](./README.zh-CN.md)
 
 ## Features
 
@@ -13,18 +12,7 @@ Self-hosted Xray proxy management for small teams. Push configs over SSH, detect
 - SSH-based sync with atomic uploads and remote service reloads
 - Single-binary deployment with the frontend embedded via `go:embed`
 - Runtime system settings managed from the web UI and persisted in the database
-
-## Screenshots
-
-Place screenshots in [`docs/screenshots/`](./docs/screenshots/) with the following naming convention:
-
-- `01-login.png`
-- `02-dashboard.png`
-- `03-users.png`
-- `04-profiles.png`
-- `05-settings.png`
-- `06-subscribe.png`
-
+- 
 Recommended capture order:
 
 1. Login screen
