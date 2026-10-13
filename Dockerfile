@@ -74,8 +74,6 @@ ENV XRAY_PILOT_SERVER_PORT=8080 \
     XRAY_PILOT_SSH_KNOWN_HOSTS_PATH=/data/known_hosts \
     TZ=UTC
 
-# Persist the SQLite database, backups, known_hosts and any mounted SSH key.
-VOLUME ["/data"]
 
 USER xray
 EXPOSE 8080
