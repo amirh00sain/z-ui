@@ -1,0 +1,134 @@
+package handler
+
+import (
+	"io/fs"
+
+	"github.com/gin-gonic/gin"
+)
+
+// RegisterRoutes 注册所有路由。
+// releaseNotesFS 为内嵌的 release-notes 目录（可为 nil，此时更新日志接口返回空列表）。
+func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
+	userH := NewUserHandler()
+	groupH := NewGroupHandler()
+	nodeH := NewNodeHandler()
+	profileH := NewProfileHandler()
+	logH := NewLogHandler()
+	authH := NewAuthHandler()
+	systemH := NewSystemHandler()
+	subH := NewSubscribeHandler()
+	feishuH := NewFeishuHandler()
+	trafficH := NewTrafficHandler()
+	backupH := NewBackupHandler()
+	installH := NewInstallHandler()
+	releaseNotesH := NewReleaseNotesHandler(releaseNotesFS)
+	adminH := NewAdminHandler()
+
+	// 订阅（无需鉴权）
+	r.GET("/sub/:token", subH.Subscribe)
+	r.POST("/api/feishu/events", feishuH.Events)
+
+	// 登录（无需鉴权）
+	r.POST("/api/auth/login", authH.Login)
+
+	// 节点装机脚本端点（token 鉴权，非 JWT）
+	install := r.Group("/api/install")
+	{
+		install.GET("/panel-pubkey", installH.GetPanelPubkey)
+		install.POST("/register", installH.Register)
+	}
+
+	// 需要 JWT 鉴权的路由
+	api := r.Group("/api", JWTMiddleware())
+	{
+		// 用户管理
+		api.GET("/users", userH.List)
+		api.POST("/users", userH.Create)
+		api.PUT("/users/:id", userH.Update)
+		api.DELETE("/users/:id", userH.Delete)
+		api.PATCH("/users/:id/toggle", userH.Toggle)
+		api.POST("/users/:id/reset-uuid", userH.ResetUUID)
+		api.POST("/users/:id/reset-token", userH.ResetToken)
+		api.POST("/users/:id/feishu-push", feishuH.PushUser)
+		api.POST("/users/:id/feishu-bind", feishuH.BindUser)
+		api.POST("/users/:id/feishu-unbind", feishuH.UnbindUser)
+		api.POST("/users/feishu-push", feishuH.PushUsers)
+
+		// 分组管理
+		api.GET("/groups", groupH.List)
+		api.POST("/groups", groupH.Create)
+		api.PUT("/groups/:id", groupH.Update)
+		api.DELETE("/groups/:id", groupH.Delete)
+
+		// 节点管理
+		api.GET("/nodes", nodeH.List)
+		api.GET("/nodes/filter-options", nodeH.FilterOptions)
+		api.POST("/nodes", nodeH.Create)
+		// 固定路径路由必须在 :id 之前注册
+		api.POST("/nodes/sync-all", nodeH.SyncAll)
+		api.POST("/nodes/sync-drifted", nodeH.SyncDrifted)
+		api.POST("/nodes/keygen", nodeH.Keygen)
+		// 节点一键接入 token 管理（管理员域）
+		api.POST("/nodes/install-tokens", installH.CreateToken)
+		api.GET("/nodes/install-tokens", installH.ListTokens)
+		api.GET("/nodes/install-tokens/:token", installH.GetToken)
+		api.DELETE("/nodes/install-tokens/:id", installH.DeleteToken)
+		api.GET("/nodes/:id", nodeH.Get)
+		api.PUT("/nodes/:id", nodeH.Update)
+		api.DELETE("/nodes/:id", nodeH.Delete)
+		api.PATCH("/nodes/:id/toggle", nodeH.Toggle)
+		api.POST("/nodes/:id/sync", nodeH.Sync)
+		api.GET("/nodes/:id/preview-config", nodeH.PreviewConfig)
+		api.POST("/nodes/:id/test-ssh", nodeH.TestSSH)
+		// 节点协议密钥管理（静态路径 keygen 必须在动态 :profile_id 之前）
+		api.GET("/nodes/:id/keys", profileH.GetNodeKeys)
+		api.POST("/nodes/:id/keys/:profile_id/keygen", profileH.KeygenNodeKey)
+		api.PUT("/nodes/:id/keys/:profile_id", profileH.UpsertNodeKey)
+		api.PATCH("/nodes/:id/keys/:profile_id/lock", profileH.ToggleNodeKeyLock)
+		api.DELETE("/nodes/:id/keys/:profile_id", profileH.DeleteNodeKey)
+
+		// 协议接入配置（InboundProfile）
+		api.GET("/profiles", profileH.List)
+		api.POST("/profiles", profileH.Create)
+		api.PUT("/profiles/:id", profileH.Update)
+		api.DELETE("/profiles/:id", profileH.Delete)
+
+		// 操作日志
+		api.GET("/logs", logH.List)
+		api.POST("/logs/cleanup", logH.Cleanup)
+
+		// 流量统计
+		api.GET("/traffic/summary", trafficH.Summary)
+
+		// 数据库备份
+		api.GET("/system/backups", backupH.List)
+		api.POST("/system/backups", backupH.Run)
+		api.GET("/system/backups/:name/download", backupH.Download)
+		api.DELETE("/system/backups/:name", backupH.Delete)
+
+		// 系统信息（只读）
+		api.GET("/system/info", systemH.GetSystemInfo)
+		api.GET("/system/release-notes", releaseNotesH.List)
+		api.GET("/system/diagnostics", systemH.GetDiagnostics)
+		api.GET("/system/sync-summary", systemH.GetSyncSummary)
+		api.GET("/system/feishu-status", systemH.GetFeishuStatus)
+		api.POST("/system/feishu-test", systemH.TestFeishuConfig)
+		// 运行时配置（KV，可读写）
+		api.GET("/system/settings", systemH.GetSettings)
+		api.PUT("/system/settings", systemH.UpdateSettings)
+
+		// 当前管理员
+		api.GET("/me", adminH.Me)
+		api.PUT("/me/password", adminH.ChangeMyPassword)
+
+		// 管理员账号管理（仅 super_admin）
+		admins := api.Group("/admins", RequireSuperAdmin())
+		{
+			admins.GET("", adminH.List)
+			admins.POST("", adminH.Create)
+			admins.PUT("/:id", adminH.Update)
+			admins.DELETE("/:id", adminH.Delete)
+			admins.PUT("/:id/password", adminH.SetPassword)
+		}
+	}
+}

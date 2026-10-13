@@ -1,0 +1,110 @@
+package crypto
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/json"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/imrui/xray-pilot/config"
+)
+
+// masterKeyBytes 返回 32 字节的 AES-256 密钥
+func masterKeyBytes() ([]byte, error) {
+	key := config.Global.Crypto.MasterKey
+	if key == "" {
+		return nil, errors.New("MasterKey is not configured")
+	}
+	b, err := hex.DecodeString(key)
+	if err != nil {
+		// 非 hex 格式，直接 SHA256 派生
+		h := sha256.Sum256([]byte(key))
+		return h[:], nil
+	}
+	if len(b) != 32 {
+		return nil, fmt.Errorf("MasterKey must be 32 bytes (64 hex chars), got %d bytes", len(b))
+	}
+	return b, nil
+}
+
+// Encrypt 使用 AES-GCM 加密明文，返回 hex(nonce+ciphertext)
+func Encrypt(plaintext string) (string, error) {
+	key, err := masterKeyBytes()
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return hex.EncodeToString(ciphertext), nil
+}
+
+// Decrypt 解密 Encrypt() 输出的 hex 字符串
+func Decrypt(cipherHex string) (string, error) {
+	key, err := masterKeyBytes()
+	if err != nil {
+		return "", err
+	}
+	data, err := hex.DecodeString(cipherHex)
+	if err != nil {
+		return "", fmt.Errorf("illegal ciphertext format: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(data) < gcm.NonceSize() {
+		return "", errors.New("ciphertext is too short")
+	}
+	nonce, ciphertext := data[:gcm.NonceSize()], data[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("decryption failed: %w", err)
+	}
+	return string(plain), nil
+}
+
+// HashConfig 计算配置内容的 SHA256，用于 ConfigHash 漂移检测
+func HashConfig(content string) string {
+	content = canonicalizeJSON(content)
+	h := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(h[:])
+}
+
+func canonicalizeJSON(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+
+	var payload interface{}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return trimmed
+	}
+
+	normalized, err := json.Marshal(payload)
+	if err != nil {
+		return trimmed
+	}
+	return string(normalized)
+}

@@ -1,0 +1,270 @@
+package scheduler
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/imrui/xray-pilot/internal/entity"
+	"github.com/imrui/xray-pilot/internal/repository"
+	"github.com/imrui/xray-pilot/internal/service"
+)
+
+// Scheduler 管理所有定时任务
+type Scheduler struct {
+	syncSvc    *service.SyncService
+	userSvc    *service.UserService
+	trafficSvc *service.TrafficService
+	backupSvc  *service.BackupService
+	settingSvc *service.SettingService
+	installSvc *service.InstallService
+	panelSvc   *service.PanelService
+	nodeRepo   *repository.NodeRepository
+	logRepo    *repository.LogRepository
+	log        *zap.Logger
+}
+
+func New() *Scheduler {
+	return &Scheduler{
+		syncSvc:    service.NewSyncService(),
+		userSvc:    service.NewUserService(),
+		trafficSvc: service.NewTrafficService(),
+		backupSvc:  service.NewBackupService(),
+		settingSvc: service.NewSettingService(),
+		installSvc: service.NewInstallService(),
+		panelSvc:   service.NewPanelService(),
+		nodeRepo:   repository.NewNodeRepository(),
+		logRepo:    repository.NewLogRepository(),
+		log:        zap.L().Named("scheduler"),
+	}
+}
+
+// Start 启动所有定时任务，ctx 取消时自动退出
+func (s *Scheduler) Start(ctx context.Context) {
+	driftInterval := s.settingSvc.GetInt(service.KeySchedulerDriftInterval)
+	healthInterval := s.settingSvc.GetInt(service.KeySchedulerHealthInterval)
+	trafficInterval := s.settingSvc.GetInt(service.KeySchedulerTrafficInterval)
+
+	if driftInterval > 0 {
+		go s.runLoop(ctx, "drift_check",
+			time.Duration(driftInterval)*time.Second,
+			0,
+			s.runDriftCheck,
+		)
+	}
+
+	// 过期用户摘除：复用漂移检测周期（漂移检测禁用时退化为固定 5 分钟，
+	// 过期摘除是正确性项，不随漂移检测一起关闭）
+	sweepInterval := time.Duration(driftInterval) * time.Second
+	if sweepInterval <= 0 {
+		sweepInterval = 5 * time.Minute
+	}
+	go s.runLoop(ctx, "expired_user_sweep",
+		sweepInterval,
+		20*time.Second,
+		s.runExpiredUserSweep,
+	)
+
+	if healthInterval > 0 {
+		go s.runLoop(ctx, "health_check",
+			time.Duration(healthInterval)*time.Second,
+			15*time.Second,
+			s.runHealthCheck,
+		)
+	}
+
+	if trafficInterval > 0 {
+		go s.runLoop(ctx, "traffic_poll",
+			time.Duration(trafficInterval)*time.Second,
+			30*time.Second, // 启动后 30s 延迟，避免与 health_check 抢资源
+			func() { s.trafficSvc.RunOnce(ctx) },
+		)
+	}
+
+	backupHours := s.settingSvc.GetInt(service.KeyBackupIntervalHours)
+	if backupHours > 0 {
+		go s.runLoop(ctx, "backup_run",
+			time.Duration(backupHours)*time.Hour,
+			1*time.Hour, // 启动后 1h 触发首次，避免启动风暴
+			func() { s.backupSvc.RunOnce() },
+		)
+	}
+
+	// 安装 token 清理：固定 1 小时一次，无需配置项
+	go s.runLoop(ctx, "install_token_cleanup",
+		1*time.Hour,
+		5*time.Minute,
+		s.runInstallTokenCleanup,
+	)
+
+	// 面板出网 IP 探测：固定 1 小时一次（启动后 10 秒先跑一次，让一键接入
+	// 对话框首次打开就能拿到 IP）。
+	go s.runLoop(ctx, "panel_outbound_ip_detect",
+		1*time.Hour,
+		10*time.Second,
+		func() { s.runPanelOutboundIPDetect(ctx) },
+	)
+}
+
+// runPanelOutboundIPDetect 拿到面板出网 IP 后写入 setting；用于一键接入提示。
+func (s *Scheduler) runPanelOutboundIPDetect(ctx context.Context) {
+	ip, err := s.panelSvc.DetectOutboundIP(ctx)
+	if err != nil {
+		s.log.Warn("panel outbound IP probe failed", zap.Error(err))
+		return
+	}
+	s.log.Debug("panel outbound IP refreshed", zap.String("ip", ip))
+}
+
+// runInstallTokenCleanup 清理已过期且未使用的一次性安装 token
+func (s *Scheduler) runInstallTokenCleanup() {
+	deleted, err := s.installSvc.CleanupExpired()
+	if err != nil {
+		s.log.Warn("install token cleanup failed", zap.Error(err))
+		s.logRepo.RecordWithActor(
+			"install_token_cleanup",
+			"all",
+			"system:scheduler:install_token_cleanup",
+			false,
+			err.Error(),
+			0,
+		)
+		return
+	}
+	if deleted > 0 {
+		s.log.Info("install token cleanup finished", zap.Int64("deleted", deleted))
+		s.logRepo.RecordWithActor(
+			"install_token_cleanup",
+			"all",
+			"system:scheduler:install_token_cleanup",
+			true,
+			fmt.Sprintf("deleted=%d", deleted),
+			0,
+		)
+	}
+}
+
+// runLoop 通用定时循环，启动时不立即执行（等待第一个 tick），ctx 取消时退出
+func (s *Scheduler) runLoop(ctx context.Context, name string, interval time.Duration, initialDelay time.Duration, task func()) {
+	s.log.Info("scheduler started",
+		zap.String("task", name),
+		zap.Duration("interval", interval),
+		zap.Duration("initial_delay", initialDelay),
+	)
+
+	if initialDelay > 0 {
+		timer := time.NewTimer(initialDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			s.log.Info("scheduler stopped", zap.String("task", name))
+			return
+		case <-timer.C:
+		}
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.log.Info("scheduler stopped", zap.String("task", name))
+			return
+		case <-ticker.C:
+			task()
+		}
+	}
+}
+
+// ---- 过期用户摘除 ----
+
+func (s *Scheduler) runExpiredUserSweep() {
+	const actor = "system:scheduler:expired_user_sweep"
+	start := time.Now()
+	result, err := s.userSvc.SweepExpired(start)
+	if err != nil {
+		s.log.Warn("failed to remove expired users", zap.Error(err))
+		s.logRepo.RecordWithActor("expired_user_sweep", "all", actor, false, err.Error(), time.Since(start).Milliseconds())
+		return
+	}
+	if len(result.Swept) == 0 {
+		return
+	}
+	mode := "live-apply"
+	if !result.LiveApply {
+		mode = "marked drifted, waiting for sync"
+	}
+	s.log.Info("expired users removed", zap.Strings("users", result.Swept), zap.String("mode", mode))
+	s.logRepo.RecordWithActor("expired_user_sweep", strings.Join(result.Swept, ","), actor, true, mode, time.Since(start).Milliseconds())
+}
+
+// ---- 漂移检测 ----
+
+func (s *Scheduler) runDriftCheck() {
+	s.log.Debug("drift check started")
+	driftCount, errs := s.syncSvc.CheckDriftAll()
+	if len(errs) > 0 {
+		s.log.Warn("drift check partially failed",
+			zap.Int("drift_count", driftCount),
+			zap.Strings("errors", errs),
+		)
+	} else {
+		s.log.Info("drift check finished", zap.Int("drift_count", driftCount))
+	}
+}
+
+// ---- 健康检测 ----
+
+func (s *Scheduler) runHealthCheck() {
+	s.log.Debug("health check started")
+	nodes, err := s.nodeRepo.FindAll()
+	if err != nil {
+		s.log.Error("health check: failed to query nodes", zap.Error(err))
+		return
+	}
+
+	okCount, failCount := 0, 0
+	for _, node := range nodes {
+		node := node
+		sshPort := node.SSHPort
+		if sshPort == 0 {
+			sshPort = 22
+		}
+		ok, latencyMs := service.TCPProbe(node.IP, sshPort)
+		if err := s.nodeRepo.UpdateLastCheck(node.ID, ok, latencyMs); err != nil {
+			s.log.Warn("health check: failed to update status",
+				zap.Uint("nodeID", node.ID),
+				zap.Error(err),
+			)
+		}
+		// 节点从健康变为不健康时，记录日志
+		if !ok && node.LastCheckOK {
+			s.logRepo.RecordWithActor(
+				"health_check",
+				nodeTarget(node),
+				"system:scheduler:health_check",
+				false,
+				"node unreachable (TCP connection failed)",
+				int64(latencyMs),
+			)
+			failCount++
+		} else if ok {
+			okCount++
+		} else {
+			failCount++
+		}
+
+	}
+	s.log.Info("health check finished",
+		zap.Int("ok", okCount),
+		zap.Int("fail", failCount),
+		zap.Int("total", len(nodes)),
+	)
+}
+
+func nodeTarget(n entity.Node) string {
+	return fmt.Sprintf("%s(%s)", n.Name, n.IP)
+}

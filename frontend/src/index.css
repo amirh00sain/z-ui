@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/* Fonts are self-hosted from @fontsource in main.tsx (they ship inside dist and are
+   go:embed'ed together with the app), so no Google Fonts request is made at runtime. */
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: light;
+  /* Light theme — steel-blue dashboard palette.
+     Sampled from the reference design: paper #f7fafc, white surfaces,
+     slate-navy text #27384d, muted steel accent #3a6382. */
+  --app-bg: #f7fafc;
+  --app-bg-soft: #ffffff;
+  --sidebar: #ffffff;
+  --sidebar-hover: #f2f7fb;
+  --header: #fafbfd;
+  --panel: #ffffff;
+  --panel-strong: #ffffff;
+  --panel-muted: #f5f9fc;
+  --border: #eef2f6;
+  --border-strong: #e2eaf1;
+  --text: #27384d;
+  --text-soft: #566c80;
+  --text-faint: #93a4b4;
+  --accent: #3a6382;
+  --accent-strong: #2e5270;
+  --accent-soft: rgba(58, 99, 130, 0.1);
+  --accent-ring: rgba(58, 99, 130, 0.18);
+  --accent-contrast: #ffffff;
+  --accent-glow: rgba(58, 99, 130, 0.1);
+  /* Active nav item: solid steel-blue pill with white text */
+  --nav-active-bg: #3a6382;
+  --nav-active-text: #ffffff;
+  --danger: #c0454b;
+  --danger-soft: rgba(192, 69, 75, 0.1);
+  --danger-border: rgba(192, 69, 75, 0.24);
+  /* warning / success are also used as plain text colours (chips, hint rows),
+     so they stay on the 700 band to clear 4.5:1 against white */
+  --warning: #9a6412;
+  --warning-soft: rgba(197, 138, 34, 0.14);
+  --warning-border: rgba(197, 138, 34, 0.32);
+  --success: #1c7a52;
+  --success-soft: rgba(28, 140, 96, 0.11);
+  --success-border: rgba(28, 140, 96, 0.3);
+  --overlay: rgba(15, 30, 45, 0.45);
+  --code-bg: #0f1720;
+  --code-text: #e5ecf3;
+  --shadow-panel: 0 1px 2px rgba(16, 40, 66, 0.04), 0 1px 3px rgba(16, 40, 66, 0.05);
+  --shadow-card: 0 1px 2px rgba(16, 40, 66, 0.05);
+  --radius-panel: 18px;
+  --radius-control: 12px;
+  --badge-green-bg: #e3f4ec;
+  --badge-green-text: #14603f;
+  --badge-green-border: #b6e0cd;
+  --badge-yellow-bg: #fdf1dc;
+  --badge-yellow-text: #7d5310;
+  --badge-yellow-border: #f2d9a8;
+  --badge-red-bg: #fceaea;
+  --badge-red-text: #97343a;
+  --badge-red-border: #f3c3c5;
+  --badge-gray-bg: #eef3f7;
+  --badge-gray-text: #4f6377;
+  --badge-gray-border: #dde6ee;
+  --badge-blue-bg: #e7eff7;
+  --badge-blue-text: #2b557a;
+  --badge-blue-border: #c5d8ea;
+}
+
+.dark {
+  color-scheme: dark;
+  /* Night theme — same steel-blue family pushed down into deep navy slate.
+     Sidebar + header sit darkest, canvas one step lighter, cards on top. */
+  --app-bg: #0c131b;
+  --app-bg-soft: #0f1720;
+  --sidebar: #0a1017;
+  --sidebar-hover: #14202b;
+  --header: #0a1017;
+  --panel: #111a23;
+  --panel-strong: #141e28;
+  --panel-muted: #18232e;
+  --border: #21303d;
+  --border-strong: #2c3d4c;
+  --text: #e6eef6;
+  --text-soft: #9db1c3;
+  --text-faint: #71879a;
+  --accent: #7aa8ca;
+  --accent-strong: #9cc0dc;
+  --accent-soft: rgba(122, 168, 202, 0.16);
+  --accent-ring: rgba(122, 168, 202, 0.3);
+  --accent-contrast: #08111a;
+  --accent-glow: rgba(122, 168, 202, 0.14);
+  /* Active nav item keeps the steel-blue pill, lightened for dark surfaces */
+  --nav-active-bg: #2f5573;
+  --nav-active-text: #f2f7fb;
+  --danger: #f08b8f;
+  --danger-soft: rgba(240, 139, 143, 0.14);
+  --danger-border: rgba(240, 139, 143, 0.3);
+  --warning: #ecb65c;
+  --warning-soft: rgba(236, 182, 92, 0.14);
+  --warning-border: rgba(236, 182, 92, 0.3);
+  --success: #63c79b;
+  --success-soft: rgba(99, 199, 155, 0.14);
+  --success-border: rgba(99, 199, 155, 0.3);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --code-bg: #0a1017;
+  --code-text: #e2ebf3;
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.02);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --badge-green-bg: rgba(99, 199, 155, 0.12);
+  --badge-green-text: #a9e7cd;
+  --badge-green-border: rgba(99, 199, 155, 0.32);
+  --badge-yellow-bg: rgba(236, 182, 92, 0.12);
+  --badge-yellow-text: #f5d9a5;
+  --badge-yellow-border: rgba(236, 182, 92, 0.32);
+  --badge-red-bg: rgba(240, 139, 143, 0.12);
+  --badge-red-text: #f7c2c4;
+  --badge-red-border: rgba(240, 139, 143, 0.32);
+  --badge-gray-bg: rgba(157, 177, 195, 0.12);
+  --badge-gray-text: #e2ebf3;
+  --badge-gray-border: rgba(157, 177, 195, 0.3);
+  --badge-blue-bg: rgba(122, 168, 202, 0.14);
+  --badge-blue-text: #c3dcf0;
+  --badge-blue-border: rgba(122, 168, 202, 0.34);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    background: var(--app-bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  button,
+  [role="button"],
+  a {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--accent-ring);
+  }
+}
+
+@layer utilities {
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .panel-strong {
+    background: var(--panel-strong);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-card);
+  }
+
+  .panel-muted {
+    background: var(--panel-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+  }
+
+  .text-soft {
+    color: var(--text-soft);
+  }
+
+  .text-faint {
+    color: var(--text-faint);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .soft-divider {
+    border-top: 1px solid var(--border);
+  }
+}
+
+@layer base {
+  /* Force native <option> menus onto the theme so dark mode never shows white-on-white */
+  option {
+    background-color: var(--panel-strong);
+    color: var(--text);
+  }
+}

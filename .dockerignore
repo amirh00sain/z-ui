@@ -1,0 +1,46 @@
+# VCS / editor
+.git
+.github
+.vscode
+.idea
+.claude
+.codex
+.agent
+.cache
+**/*.swp
+**/*~
+**/.DS_Store
+.DS_Store
+
+# Dependencies and build output (the image builds its own)
+**/node_modules
+**/dist
+**/coverage
+frontend/node_modules
+frontend/dist
+tmp
+
+# Go build artifacts and local runtime state
+xray-pilot
+xray-pilot.exe
+**/*.test
+**/*.out
+**/*.prof
+coverage.out
+vendor
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+data
+logs
+**/*.log
+
+# Local secrets and environment
+config.yaml
+**/.env
+**/.env.*
+**/*.env
+
+# Docs that are not needed to build the image
+docs
+README.zh-CN.md
